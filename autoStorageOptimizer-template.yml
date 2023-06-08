@@ -1,0 +1,235 @@
+# igarcia 2023-05
+# Version 1.0.0
+# Automation for Compute Optimizer Recommendations for EBS (Storage)
+# Create a Scheduled Lambda with CloudWatch Event to implements Compute Optimizer Recommendations changes on EBS Volumes
+# Resources to create: Lambda, CloudWatch Event, IAM Role, SNS Topic
+# The AWS Account should be already signed up to AWS Compute Optimizer
+# Now You can specify exceptions of EBS types to not use
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to automate the Compute Optimizer Recommendations for EBS changes - v1.0.0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Stack Environment"
+        Parameters:
+          - TemplateAmbiente
+      -
+        Label:
+          default: "Storage Optimizer Auto-Changes Setup"
+        Parameters:
+          - pExceptions
+          - pRisk
+          - pDia
+          - pHora
+          - pTagBusqueda
+          - pTagValor
+          - pCorreo
+    ParameterLabels: #Define Friendly Names
+      TemplateAmbiente:
+        default: "Value for CloudFormation Resources Env Tag"
+      pDia:
+        default: "Day of the week for Maintenance Window (when to apply the change)"
+      pHora:
+        default: "Time for the Modification to occur in UTC"
+      pExceptions:
+        default: "EBS Volume type Exceptions"
+      pRisk:
+        default: "Tolerable Risk"
+      pTagBusqueda:
+        default: "Exception Tag Key, sets the Tag used to identified Volumes to SKIP Storage Optimizer"
+      pTagValor:
+        default: "Exception Tag Value, sets the Value of the Tag to identified volumes"
+      pCorreo:
+        default: "E-Mail Address to receive Notifications about changes applied. Leave default value for NO Notifications."
+
+Parameters:
+  TemplateAmbiente:
+    Type: String
+    Description: "Tag Env to set on CloudFormation resources"
+    Default: Test
+    MaxLength: 10
+    MinLength: 2
+    ConstraintDescription: "Set a simple Tag between 2 and 10 characters long"
+  pDia:
+    Type: String
+    Description: "Day of the week to apply the Recommendation"
+    Default: "Mon"
+    AllowedValues: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+  pHora:
+    Type: String
+    Description: "At what time, in 24 hours UTC time format ##:##, the Change will be applied"
+    Default: "6:01"
+    AllowedPattern: "^[0-2]?[0-9]:[0-5][0-9]$"
+    ConstraintDescription: "Please set a time between 0:00 a 23:59"
+  pRisk:
+    Type: Number
+    Description: "Set the tolerable Risk of the recommendation, 0 No Risk - 5 Very high, Default 1 (Very Low)"
+    Default: 1
+    MaxValue: 5
+    MinValue: 0
+    ConstraintDescription: "Please set a value between 0 and 5"
+  pExceptions:
+    Type: String
+    Description: "EBS Volume Type Exceptions, a list of types. Ex: sc1, st1, gp2"
+    Default: "gp2, io1"
+  pTagBusqueda:
+    Type: String
+    Description: "Tag Key that identify EBS Volumes to SKIP Storage Optimizer"
+    Default: Optimize
+    MaxLength: 20
+    MinLength: 1
+    ConstraintDescription: "Set a simple Tag between 2 and 20 characters long"
+  pTagValor:
+    Type: String
+    Description: "Tag Value to identify EBS Volumes"
+    Default: "False"
+    MaxLength: 20
+    MinLength: 1
+    ConstraintDescription: "Please set a simple value without spaces"
+  pCorreo:
+    Type: String
+    Description: "E-mail address for Notifications"
+    Default: "not@notify.me"
+    MaxLength: 50
+    MinLength: 5
+    ConstraintDescription: "Please write a valid e-mail address."
+
+Resources:
+  TemplateSNS:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Join [ "-", [ "AutoStorageOptimizerTopic", !Ref TemplateAmbiente ] ]
+      TopicName: !Join [ "-", [ "AutoStorageOptimizerTopic", !Ref TemplateAmbiente ] ]
+      Subscription:
+        -
+          Endpoint: !Ref pCorreo
+          Protocol: email
+      Tags:
+        - Key: Env
+          Value: !Ref TemplateAmbiente
+
+  TemplateRole: #Role for Lambda
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Description: Role to execute AutoStorageOptimizer
+      Policies: 
+        -
+          PolicyName: !Join [ "-", [ "PolicyLambdaExec", !Ref TemplateAmbiente ] ]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        -
+          PolicyName: !Join [ "-", [ "PolicyLambdaEC2", !Ref TemplateAmbiente ] ]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "ec2:*"
+                Resource: "*"
+        -
+          PolicyName: !Join [ "-", [ "PolicyLambdaStorageOptimizer", !Ref TemplateAmbiente ] ]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "compute-optimizer:*"
+                Resource: "*"
+        -
+          PolicyName: !Join [ "-", [ "PolicyLambdaSNS", !Ref TemplateAmbiente ] ]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "sns:*"
+                Resource: !Ref TemplateSNS
+      RoleName: !Join [ "-", [ "RoleforAutoStorageOptimizer", !Ref TemplateAmbiente ] ]
+      Tags:
+        - Key: Env
+          Value: !Ref TemplateAmbiente
+
+  TemplateLambda:  #Lambda to implement Recommendations
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Join [ "-", [ "higher-artifacts", !Ref "AWS::Region" ] ]
+        S3Key: "solutions/AutoStorageOptimizer.zip"
+      Description: Implements the recommendations of AWS Compute Optimizer for EBS by an automation
+      Environment:
+        Variables:
+          AMBIENTE: !Ref TemplateAmbiente
+          RISK: !Ref pRisk
+          EXCEPTIONS: !Ref pExceptions
+          TAGBUSQUEDA: !Ref pTagBusqueda
+          TAGVALOR: !Ref pTagValor
+          TOPIC: !Ref TemplateSNS
+          CORREO: !Ref pCorreo
+      FunctionName: !Join [ "-", [ "AutoStorageOptimizerLambda", !Ref TemplateAmbiente ] ]
+      Role: !GetAtt TemplateRole.Arn
+      Timeout: 300
+      Handler: autostorageoptimizer.lambda_handler
+      Runtime: python3.10
+      MemorySize: 256
+      Tags:
+        -
+          Key: Env
+          Value: !Ref TemplateAmbiente
+
+  TemplateEventLambda:  #Event to invoke Lambda
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Invoke Lambda for Compute Optimizer Automation for Storage
+      Name: !Join [ "-", [ "AutoStorageOptimizerEvent", !Ref TemplateAmbiente ] ]
+      ScheduleExpression: !Join [ "", [ "cron(",!Select [ 1, !Split [ ":", !Ref pHora] ]," ", !Select [ 0, !Split [ ":", !Ref pHora] ], " ? ","* ",!Ref pDia," *)" ] ]
+      State: ENABLED
+      Targets:
+        -
+          Arn: !GetAtt TemplateLambda.Arn
+          Id: !Join [ "-", [!Ref TemplateAmbiente, "AutoStorageOptimizerLambda" ] ]
+
+  TemplatePermisoEventLambda: #Relaciona permisos del Event con Lambda
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TemplateLambda.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TemplateEventLambda.Arn
+
+Outputs: #Outputs of the Template
+  FrequencyAutoCO:
+    Description: Frequency for Auto implement Compute Optimizer recommendations for Storage
+    Value: !Join [ " ", [ "Every", !Ref pDia, "at", !Ref pHora, "UTC" ] ]
+  Exceptions:
+    Description: EBS Volumes types forbidden to be used
+    Value: !Ref pExceptions
+  TolerableRisk:
+    Description: Tolerable Risk for the Recommendations (0 = very low - 5 = very high)
+    Value: !Ref pRisk
+  NotificationsEmail:
+    Description: Email address for Notifications
+    Value: !Ref pCorreo
