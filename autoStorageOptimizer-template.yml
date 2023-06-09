@@ -176,6 +176,8 @@ Resources:
   TemplateLambda:  #Lambda to implement Recommendations
     Type: AWS::Lambda::Function
     Properties:
+      Architectures: 
+        - arm64
       Code:
         S3Bucket: !Join [ "-", [ "higher-artifacts", !Ref "AWS::Region" ] ]
         S3Key: "solutions/AutoStorageOptimizer.zip"
