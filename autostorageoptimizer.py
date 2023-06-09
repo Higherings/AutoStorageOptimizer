@@ -38,10 +38,11 @@ def review_compute_optimizer_recos(vol):
 					
 	to_do = True # Flag to determine if Volume will be examined
 	vol_tags = volume.tags
-	for tag in vol_tags:
-		if tag['Key'] == TAGBUSQUEDA:
-			if tag['Value'] == TAGVALOR:
-				to_do = False
+	if vol_tags:
+		for tag in vol_tags:
+			if tag['Key'] == TAGBUSQUEDA:
+				if tag['Value'] == TAGVALOR:
+					to_do = False
 
 	if to_do:
 		for option in vol['volumeRecommendationOptions']:
@@ -54,7 +55,7 @@ def review_compute_optimizer_recos(vol):
 				new_type = option['configuration'].get('volumeType','gp3')
 				new_iops = option['configuration'].get('volumeBaselineIOPS',3000)
 				new_throughput = option['configuration'].get('volumeBaselineThroughput',125)
-				if volume.state['Name'] == 'in-use':
+				if volume.state == 'in-use':
 					try:
 						if new_type == 'gp3':
 							response = ec2_client.modify_volume(VolumeId=vol_id,VolumeType=new_type,Iops=new_iops,Throughput=new_throughput)
@@ -66,12 +67,12 @@ def review_compute_optimizer_recos(vol):
 						new_type = response['VolumeModification'].get('TargetVolumeType',new_type)
 						new_iops = response['VolumeModification'].get('TargetIops','-')
 						new_throughput = response['VolumeModification'].get('TargetThroughput','-')
-						MENSAJE = MENSAJE + "Info: Instance " + ec2_name + ", EBS volume " + vol_id + " changed to " + new_type + " with IOPS: "+new_iops+" and Throughput: "+new_throughput+" MiB/s\n"
+						MENSAJE = MENSAJE + "Info: Instance " + ec2_name + ", EBS volume " + vol_id + " changed to " + new_type + " with IOPS: "+str(new_iops)+" and Throughput: "+str(new_throughput)+" MiB/s\n"
 						print("Se modificó Instancia {} EBS {} a {} IOPS {} Throughput {} MiB/s".format(ec2_name, vol_id, new_type, new_iops, new_throughput))
 						break
 					except:
 						cambio = 0
-						MENSAJE = MENSAJE + "Error: Instance " + ec2_name + ", EBS volume " + vol_id + " NOT changed to " + new_type + " with IOPS: "+new_iops+" and Throughput: "+new_throughput+" MiB/s\n"
+						MENSAJE = MENSAJE + "Error: Instance " + ec2_name + ", EBS volume " + vol_id + " NOT changed to " + new_type + " with IOPS: "+str(new_iops)+" and Throughput: "+str(new_throughput)+" MiB/s\n"
 						print(response)
 						print("Error el modificar Instancia {} EBS {} a {} IOPS {} Throughput {} MiB/s".format(ec2_name, vol_id, new_type, new_iops, new_throughput))
 						break
@@ -93,7 +94,7 @@ def lambda_handler(event, context):
 
 	MENSAJE = ""
 	ebs_recos = co_client.get_ebs_volume_recommendations(filters=[{'name':'Finding','values':R_TYPE}])
-	for vol in ebs_recos['instanceRecommendations']:
+	for vol in ebs_recos['volumeRecommendations']:
 		total+=1
 		cambios = cambios + review_compute_optimizer_recos(vol)
 
@@ -102,7 +103,7 @@ def lambda_handler(event, context):
 			nextToken=ebs_recos['nextToken'],
 			filters=[{'name':'Finding','values':R_TYPE}]
 		)
-		for vol in ebs_recos['instanceRecommendations']:
+		for vol in ebs_recos['volumeRecommendations']:
 			total+=1
 			cambios = cambios + review_compute_optimizer_recos(vol)
 
