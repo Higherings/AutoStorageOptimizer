@@ -180,7 +180,7 @@ Resources:
         - arm64
       Code:
         S3Bucket: !Join [ "-", [ "higher-artifacts", !Ref "AWS::Region" ] ]
-        S3Key: "solutions/AutoStorageOptimizer.zip"
+        S3Key: "solutions/autostorageoptimizer.zip"
       Description: Implements the recommendations of AWS Compute Optimizer for EBS by an automation
       Environment:
         Variables:
